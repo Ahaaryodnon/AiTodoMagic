@@ -1,9 +1,43 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertTaskSchema, insertActivitySchema, insertVoiceCommandSchema } from "@shared/schema";
+import { insertTaskSchema, insertActivitySchema, insertVoiceCommandSchema, microsoftConfig } from "@shared/schema";
 import { processVoiceCommand } from "./lib/openai";
 import { syncWithMicrosoftTodo } from "./lib/microsoft-graph";
+import { db } from "./db";
+import { eq } from "drizzle-orm";
+
+// Helper functions for Microsoft configuration
+async function getMicrosoftConfig() {
+  const [config] = await db.select().from(microsoftConfig).limit(1);
+  return config || {
+    clientId: process.env.MICROSOFT_CLIENT_ID || "",
+    tenantId: process.env.MICROSOFT_TENANT_ID || "",
+    clientSecret: process.env.MICROSOFT_CLIENT_SECRET || "",
+    accessToken: process.env.MICROSOFT_ACCESS_TOKEN || "",
+    refreshToken: null,
+    tokenExpiresAt: null,
+  };
+}
+
+async function saveMicrosoftConfig(configData: any) {
+  const existingConfig = await db.select().from(microsoftConfig).limit(1);
+  
+  if (existingConfig.length > 0) {
+    const [updated] = await db
+      .update(microsoftConfig)
+      .set({ ...configData, updatedAt: new Date() })
+      .where(eq(microsoftConfig.id, existingConfig[0].id))
+      .returning();
+    return updated;
+  } else {
+    const [created] = await db
+      .insert(microsoftConfig)
+      .values(configData)
+      .returning();
+    return created;
+  }
+}
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Tasks routes
@@ -212,28 +246,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Microsoft Graph configuration
-  let microsoftConfig = {
-    clientId: process.env.MICROSOFT_CLIENT_ID || "",
-    tenantId: process.env.MICROSOFT_TENANT_ID || "",
-    clientSecret: process.env.MICROSOFT_CLIENT_SECRET || "",
-    accessToken: process.env.MICROSOFT_ACCESS_TOKEN || "",
-  };
-
   app.get("/api/microsoft-config", async (req, res) => {
     try {
-      console.log("Current Microsoft config:", {
-        hasClientId: !!microsoftConfig.clientId,
-        hastenantId: !!microsoftConfig.tenantId,
-        hasClientSecret: !!microsoftConfig.clientSecret,
-        hasAccessToken: !!microsoftConfig.accessToken
-      });
+      const config = await getMicrosoftConfig();
       
       res.json({
-        clientId: microsoftConfig.clientId ? "configured" : "",
-        tenantId: microsoftConfig.tenantId ? "configured" : "",
-        clientSecret: microsoftConfig.clientSecret ? "configured" : "",
-        isConfigured: !!(microsoftConfig.clientId && microsoftConfig.tenantId && microsoftConfig.clientSecret),
-        isAuthenticated: !!microsoftConfig.accessToken,
+        clientId: config.clientId ? "configured" : "",
+        tenantId: config.tenantId ? "configured" : "",
+        clientSecret: config.clientSecret ? "configured" : "",
+        isConfigured: !!(config.clientId && config.tenantId && config.clientSecret),
+        isAuthenticated: !!config.accessToken,
       });
     } catch (error) {
       res.status(500).json({ message: "Failed to get Microsoft configuration" });
@@ -248,12 +270,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "All fields are required" });
       }
 
-      microsoftConfig = {
-        ...microsoftConfig,
+      await saveMicrosoftConfig({
         clientId,
         tenantId,
         clientSecret,
-      };
+      });
 
       res.json({ success: true, message: "Configuration saved successfully" });
     } catch (error) {
@@ -263,14 +284,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/microsoft-auth", async (req, res) => {
     try {
-      if (!microsoftConfig.clientId || !microsoftConfig.tenantId) {
+      const config = await getMicrosoftConfig();
+      
+      if (!config.clientId || !config.tenantId) {
         return res.status(400).json({ message: "Microsoft configuration is incomplete" });
       }
 
       // Generate OAuth URL
       const redirectUri = `${req.protocol}://${req.get('host')}/auth/callback`;
-      const authUrl = `https://login.microsoftonline.com/${microsoftConfig.tenantId}/oauth2/v2.0/authorize?` +
-        `client_id=${microsoftConfig.clientId}&` +
+      const authUrl = `https://login.microsoftonline.com/${config.tenantId}/oauth2/v2.0/authorize?` +
+        `client_id=${config.clientId}&` +
         `response_type=code&` +
         `redirect_uri=${encodeURIComponent(redirectUri)}&` +
         `scope=https://graph.microsoft.com/Tasks.ReadWrite%20https://graph.microsoft.com/User.Read&` +
@@ -315,8 +338,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         `);
       }
 
+      const config = await getMicrosoftConfig();
+      
       // Exchange code for access token
-      const tokenUrl = `https://login.microsoftonline.com/${microsoftConfig.tenantId}/oauth2/v2.0/token`;
+      const tokenUrl = `https://login.microsoftonline.com/${config.tenantId}/oauth2/v2.0/token`;
       const redirectUri = `${req.protocol}://${req.get('host')}/auth/callback`;
       
       const tokenResponse = await fetch(tokenUrl, {
@@ -325,8 +350,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           'Content-Type': 'application/x-www-form-urlencoded',
         },
         body: new URLSearchParams({
-          client_id: microsoftConfig.clientId,
-          client_secret: microsoftConfig.clientSecret,
+          client_id: config.clientId!,
+          client_secret: config.clientSecret!,
           code: code as string,
           redirect_uri: redirectUri,
           grant_type: 'authorization_code',
@@ -349,8 +374,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         `);
       }
 
-      // Store the access token
-      microsoftConfig.accessToken = tokenData.access_token;
+      // Store the access token in database
+      await saveMicrosoftConfig({
+        ...config,
+        accessToken: tokenData.access_token,
+        refreshToken: tokenData.refresh_token,
+        tokenExpiresAt: tokenData.expires_in ? new Date(Date.now() + tokenData.expires_in * 1000) : null,
+      });
 
       res.send(`
         <html>

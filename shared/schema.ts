@@ -34,6 +34,18 @@ export const voiceCommands = pgTable("voice_commands", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const microsoftConfig = pgTable("microsoft_config", {
+  id: serial("id").primaryKey(),
+  clientId: text("client_id"),
+  tenantId: text("tenant_id"),
+  clientSecret: text("client_secret"),
+  accessToken: text("access_token"),
+  refreshToken: text("refresh_token"),
+  tokenExpiresAt: timestamp("token_expires_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 export const tasksRelations = relations(tasks, ({ many }) => ({
   activities: many(activities),
 }));
@@ -68,9 +80,17 @@ export const insertVoiceCommandSchema = createInsertSchema(voiceCommands).omit({
   createdAt: true,
 });
 
+export const insertMicrosoftConfigSchema = createInsertSchema(microsoftConfig).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export type Task = typeof tasks.$inferSelect;
 export type InsertTask = z.infer<typeof insertTaskSchema>;
 export type Activity = typeof activities.$inferSelect;
 export type InsertActivity = z.infer<typeof insertActivitySchema>;
 export type VoiceCommand = typeof voiceCommands.$inferSelect;
 export type InsertVoiceCommand = z.infer<typeof insertVoiceCommandSchema>;
+export type MicrosoftConfig = typeof microsoftConfig.$inferSelect;
+export type InsertMicrosoftConfig = z.infer<typeof insertMicrosoftConfigSchema>;
