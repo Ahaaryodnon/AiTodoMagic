@@ -68,35 +68,18 @@ export function SettingsDialog() {
     },
     onSuccess: (data) => {
       if (data.authUrl) {
-        // Open auth URL in current window instead of popup
-        window.location.href = data.authUrl;
+        window.open(data.authUrl, "_blank");
+        toast({
+          title: "Authentication Started",
+          description: "Please complete authentication in the new window.",
+        });
       }
+      queryClient.invalidateQueries({ queryKey: ["/api/microsoft-config"] });
     },
     onError: () => {
       toast({
         title: "Authentication Error",
         description: "Failed to start Microsoft authentication process.",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const logoutMutation = useMutation({
-    mutationFn: async () => {
-      const response = await apiRequest("POST", "/api/microsoft-logout", {});
-      return response.json();
-    },
-    onSuccess: () => {
-      toast({
-        title: "Logged Out",
-        description: "Successfully logged out of Microsoft Graph.",
-      });
-      queryClient.invalidateQueries({ queryKey: ["/api/microsoft-config"] });
-    },
-    onError: () => {
-      toast({
-        title: "Logout Error",
-        description: "Failed to logout from Microsoft Graph.",
         variant: "destructive",
       });
     },
@@ -193,16 +176,6 @@ export function SettingsDialog() {
                       size="sm"
                     >
                       Authenticate
-                    </Button>
-                  )}
-                  {microsoftConfig?.isAuthenticated && (
-                    <Button
-                      variant="outline"
-                      onClick={() => logoutMutation.mutate()}
-                      disabled={logoutMutation.isPending}
-                      size="sm"
-                    >
-                      Logout
                     </Button>
                   )}
                 </div>

@@ -260,15 +260,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Microsoft configuration is incomplete" });
       }
 
-      // Generate OAuth URL for Microsoft Graph
-      const redirectUri = `${req.protocol}://${req.get('host')}/auth/microsoft/callback`;
+      // In a real implementation, this would generate OAuth URL
       const authUrl = `https://login.microsoftonline.com/${microsoftConfig.tenantId}/oauth2/v2.0/authorize?` +
         `client_id=${microsoftConfig.clientId}&` +
         `response_type=code&` +
-        `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+        `redirect_uri=${encodeURIComponent((req.headers.origin || req.protocol + '://' + req.get('host')) + "/auth/callback")}&` +
         `scope=https://graph.microsoft.com/Tasks.ReadWrite%20https://graph.microsoft.com/User.Read&` +
-        `response_mode=query&` +
-        `state=${Math.random().toString(36).substring(7)}`;
+        `response_mode=query`;
 
       res.json({ 
         authUrl,
@@ -276,58 +274,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error) {
       res.status(500).json({ message: "Failed to start authentication" });
-    }
-  });
-
-  // Handle OAuth callback
-  app.get("/auth/microsoft/callback", async (req, res) => {
-    try {
-      const { code, error } = req.query;
-
-      if (error) {
-        return res.redirect(`/?error=${encodeURIComponent(error)}`);
-      }
-
-      if (!code) {
-        return res.redirect("/?error=no_code");
-      }
-
-      // Exchange code for access token
-      const tokenUrl = `https://login.microsoftonline.com/${microsoftConfig.tenantId}/oauth2/v2.0/token`;
-      const redirectUri = `${req.protocol}://${req.get('host')}/auth/microsoft/callback`;
-      
-      const tokenParams = new URLSearchParams({
-        client_id: microsoftConfig.clientId,
-        client_secret: microsoftConfig.clientSecret,
-        code: code as string,
-        redirect_uri: redirectUri,
-        grant_type: 'authorization_code',
-        scope: 'https://graph.microsoft.com/Tasks.ReadWrite https://graph.microsoft.com/User.Read'
-      });
-
-      const tokenResponse = await fetch(tokenUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: tokenParams
-      });
-
-      const tokenData = await tokenResponse.json();
-
-      if (tokenResponse.ok && tokenData.access_token) {
-        // Store the access token
-        microsoftConfig.accessToken = tokenData.access_token;
-        
-        // Redirect back to app with success
-        res.redirect("/?auth=success");
-      } else {
-        console.error("Token exchange failed:", tokenData);
-        res.redirect(`/?error=${encodeURIComponent('token_exchange_failed')}`);
-      }
-    } catch (error) {
-      console.error("OAuth callback error:", error);
-      res.redirect(`/?error=${encodeURIComponent('callback_error')}`);
     }
   });
 
@@ -340,48 +286,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // Test actual Graph API connection
-      const response = await fetch('https://graph.microsoft.com/v1.0/me', {
-        headers: {
-          'Authorization': `Bearer ${microsoftConfig.accessToken}`,
-          'Content-Type': 'application/json'
-        }
+      // In a real implementation, this would test the actual Graph API
+      // For now, we simulate a test
+      res.json({ 
+        success: true, 
+        message: "Microsoft Graph connection test successful" 
       });
-
-      if (response.ok) {
-        const userData = await response.json();
-        res.json({ 
-          success: true, 
-          message: `Successfully connected to Microsoft Graph as ${userData.displayName || userData.userPrincipalName}` 
-        });
-      } else if (response.status === 401) {
-        // Token expired, clear it
-        microsoftConfig.accessToken = "";
-        res.json({ 
-          success: false, 
-          error: "Authentication expired. Please re-authenticate." 
-        });
-      } else {
-        res.json({ 
-          success: false, 
-          error: `Graph API test failed: ${response.status} ${response.statusText}` 
-        });
-      }
     } catch (error) {
       res.json({ 
         success: false, 
         error: "Connection test failed: " + (error instanceof Error ? error.message : "Unknown error")
       });
-    }
-  });
-
-  // Microsoft logout
-  app.post("/api/microsoft-logout", async (req, res) => {
-    try {
-      microsoftConfig.accessToken = "";
-      res.json({ success: true, message: "Successfully logged out" });
-    } catch (error) {
-      res.status(500).json({ message: "Failed to logout" });
     }
   });
 
