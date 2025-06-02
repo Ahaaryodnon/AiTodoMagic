@@ -413,7 +413,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/microsoft-test", async (req, res) => {
     try {
-      if (!microsoftConfig.accessToken) {
+      const config = await getMicrosoftConfig();
+      
+      if (!config.accessToken) {
         return res.json({ 
           success: false, 
           error: "No access token available. Please authenticate first." 
@@ -423,7 +425,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Test the connection by making a real Graph API call
       const response = await fetch('https://graph.microsoft.com/v1.0/me', {
         headers: {
-          'Authorization': `Bearer ${microsoftConfig.accessToken}`,
+          'Authorization': `Bearer ${config.accessToken}`,
           'Content-Type': 'application/json'
         }
       });
@@ -431,7 +433,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!response.ok) {
         if (response.status === 401) {
           // Clear invalid token
-          microsoftConfig.accessToken = "";
+          await saveMicrosoftConfig({
+            ...config,
+            accessToken: "",
+            refreshToken: null,
+            tokenExpiresAt: null,
+          });
           return res.json({ 
             success: false, 
             error: "Authentication expired. Please re-authenticate." 
@@ -455,7 +462,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/microsoft-logout", async (req, res) => {
     try {
-      microsoftConfig.accessToken = "";
+      const config = await getMicrosoftConfig();
+      await saveMicrosoftConfig({
+        ...config,
+        accessToken: "",
+        refreshToken: null,
+        tokenExpiresAt: null,
+      });
       res.json({ success: true, message: "Successfully logged out from Microsoft Graph" });
     } catch (error) {
       res.status(500).json({ message: "Failed to logout" });
