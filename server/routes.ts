@@ -1,0 +1,216 @@
+import type { Express } from "express";
+import { createServer, type Server } from "http";
+import { storage } from "./storage";
+import { insertTaskSchema, insertActivitySchema, insertVoiceCommandSchema } from "@shared/schema";
+import { processVoiceCommand } from "./lib/openai";
+import { syncWithMicrosoftTodo } from "./lib/microsoft-graph";
+
+export async function registerRoutes(app: Express): Promise<Server> {
+  // Tasks routes
+  app.get("/api/tasks", async (req, res) => {
+    try {
+      const tasks = await storage.getTasks();
+      res.json(tasks);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch tasks" });
+    }
+  });
+
+  app.post("/api/tasks", async (req, res) => {
+    try {
+      const validatedData = insertTaskSchema.parse(req.body);
+      const task = await storage.createTask(validatedData);
+      
+      // Log activity
+      await storage.createActivity({
+        type: "task_created",
+        description: `Created task: "${task.title}"`,
+        metadata: { taskId: task.id }
+      });
+
+      res.json(task);
+    } catch (error) {
+      res.status(400).json({ message: "Invalid task data" });
+    }
+  });
+
+  app.patch("/api/tasks/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const updates = req.body;
+      const task = await storage.updateTask(id, updates);
+      
+      if (!task) {
+        return res.status(404).json({ message: "Task not found" });
+      }
+
+      // Log activity
+      await storage.createActivity({
+        type: "task_updated",
+        description: `Updated task: "${task.title}"`,
+        metadata: { taskId: task.id, updates }
+      });
+
+      res.json(task);
+    } catch (error) {
+      res.status(400).json({ message: "Failed to update task" });
+    }
+  });
+
+  app.delete("/api/tasks/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const task = await storage.getTask(id);
+      const deleted = await storage.deleteTask(id);
+      
+      if (!deleted) {
+        return res.status(404).json({ message: "Task not found" });
+      }
+
+      // Log activity
+      if (task) {
+        await storage.createActivity({
+          type: "task_deleted",
+          description: `Deleted task: "${task.title}"`,
+          metadata: { taskId: id }
+        });
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete task" });
+    }
+  });
+
+  // Voice command processing
+  app.post("/api/voice-command", async (req, res) => {
+    try {
+      const { transcription } = req.body;
+      
+      if (!transcription) {
+        return res.status(400).json({ message: "Transcription is required" });
+      }
+
+      // Store voice command
+      const voiceCommand = await storage.createVoiceCommand({
+        transcription,
+        processed: false
+      });
+
+      // Process with AI
+      const aiResponse = await processVoiceCommand(transcription);
+      
+      // Update voice command with AI response
+      await storage.markVoiceCommandProcessed(voiceCommand.id);
+
+      // Execute the command based on AI interpretation
+      let result = null;
+      if (aiResponse.intent === "add_task" && aiResponse.taskData) {
+        const task = await storage.createTask({
+          title: aiResponse.taskData.title,
+          description: aiResponse.taskData.description,
+          priority: aiResponse.taskData.priority || "normal",
+          dueDate: aiResponse.taskData.dueDate ? new Date(aiResponse.taskData.dueDate) : undefined,
+          aiScore: aiResponse.confidence * 100
+        });
+        result = task;
+
+        await storage.createActivity({
+          type: "voice_command",
+          description: `Voice command processed: Added "${task.title}"`,
+          metadata: { voiceCommandId: voiceCommand.id, taskId: task.id }
+        });
+      } else if (aiResponse.intent === "update_task" && aiResponse.taskData) {
+        // Find task by title similarity and update
+        const tasks = await storage.getTasks();
+        const targetTask = tasks.find(t => 
+          t.title.toLowerCase().includes(aiResponse.taskData?.title?.toLowerCase() || "")
+        );
+
+        if (targetTask) {
+          const updatedTask = await storage.updateTask(targetTask.id, {
+            title: aiResponse.taskData.title || targetTask.title,
+            description: aiResponse.taskData.description || targetTask.description,
+            priority: aiResponse.taskData.priority || targetTask.priority,
+            completed: aiResponse.taskData.completed ?? targetTask.completed
+          });
+          result = updatedTask;
+
+          await storage.createActivity({
+            type: "voice_command",
+            description: `Voice command processed: Updated "${targetTask.title}"`,
+            metadata: { voiceCommandId: voiceCommand.id, taskId: targetTask.id }
+          });
+        }
+      }
+
+      res.json({
+        success: true,
+        intent: aiResponse.intent,
+        confidence: aiResponse.confidence,
+        response: aiResponse.response,
+        result
+      });
+    } catch (error) {
+      console.error("Voice command processing error:", error);
+      res.status(500).json({ message: "Failed to process voice command" });
+    }
+  });
+
+  // Activities route
+  app.get("/api/activities", async (req, res) => {
+    try {
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
+      const activities = await storage.getActivities(limit);
+      res.json(activities);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch activities" });
+    }
+  });
+
+  // Microsoft To Do sync
+  app.post("/api/sync-microsoft-todo", async (req, res) => {
+    try {
+      const result = await syncWithMicrosoftTodo();
+      
+      await storage.createActivity({
+        type: "sync",
+        description: `Synced with Microsoft To Do: ${result.syncedCount} tasks`,
+        metadata: result
+      });
+
+      res.json(result);
+    } catch (error) {
+      console.error("Microsoft To Do sync error:", error);
+      res.status(500).json({ message: "Failed to sync with Microsoft To Do" });
+    }
+  });
+
+  // Priority insights
+  app.get("/api/priority-insights", async (req, res) => {
+    try {
+      const tasks = await storage.getTasks();
+      const now = new Date();
+      const oneWeekFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+      const urgent = tasks.filter(t => !t.completed && t.priority === "high").length;
+      const dueSoon = tasks.filter(t => 
+        !t.completed && t.dueDate && t.dueDate <= oneWeekFromNow
+      ).length;
+      const suggested = tasks.filter(t => 
+        !t.completed && (t.aiScore || 0) > 70
+      ).length;
+
+      res.json({
+        urgent,
+        dueSoon,
+        suggested
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to generate priority insights" });
+    }
+  });
+
+  const httpServer = createServer(app);
+  return httpServer;
+}

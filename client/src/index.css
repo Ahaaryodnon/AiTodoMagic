@@ -1,0 +1,140 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 0 0% 100%;
+  --foreground: 240 10% 3.9%;
+  --muted: 240 4.8% 95.9%;
+  --muted-foreground: 240 3.8% 46.1%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 240 10% 3.9%;
+  --card: 0 0% 100%;
+  --card-foreground: 240 10% 3.9%;
+  --border: 240 5.9% 90%;
+  --input: 240 5.9% 90%;
+  --primary: 207 90% 54%;
+  --primary-foreground: 211 100% 99%;
+  --secondary: 240 4.8% 95.9%;
+  --secondary-foreground: 240 5.9% 10%;
+  --accent: 240 4.8% 95.9%;
+  --accent-foreground: 240 5.9% 10%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 0 0% 98%;
+  --ring: 240 10% 3.9%;
+  --radius: 0.5rem;
+  
+  /* Microsoft Design System Colors */
+  --ms-blue: 207 90% 54%;
+  --ms-blue-dark: 207 87% 46%;
+  --ms-blue-light: 191 100% 47%;
+  --ms-success: 120 100% 25%;
+  --ms-warning: 34 100% 50%;
+  --ms-error: 348 83% 47%;
+  --ms-gray-dark: 220 9% 20%;
+  --ms-gray-medium: 220 9% 46%;
+  --ms-gray-light: 40 20% 95%;
+}
+
+.dark {
+  --background: 240 10% 3.9%;
+  --foreground: 0 0% 98%;
+  --muted: 240 3.7% 15.9%;
+  --muted-foreground: 240 5% 64.9%;
+  --popover: 240 10% 3.9%;
+  --popover-foreground: 0 0% 98%;
+  --card: 240 10% 3.9%;
+  --card-foreground: 0 0% 98%;
+  --border: 240 3.7% 15.9%;
+  --input: 240 3.7% 15.9%;
+  --primary: 207 90% 54%;
+  --primary-foreground: 211 100% 99%;
+  --secondary: 240 3.7% 15.9%;
+  --secondary-foreground: 0 0% 98%;
+  --accent: 240 3.7% 15.9%;
+  --accent-foreground: 0 0% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 0 0% 98%;
+  --ring: 240 4.9% 83.9%;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+}
+
+/* Voice visualization animations */
+@keyframes wave {
+  0%, 100% { transform: scaleY(1); }
+  50% { transform: scaleY(1.5); }
+}
+
+.voice-wave {
+  animation: wave 1.5s ease-in-out infinite;
+}
+
+.voice-wave:nth-child(2) { animation-delay: 0.1s; }
+.voice-wave:nth-child(3) { animation-delay: 0.2s; }
+.voice-wave:nth-child(4) { animation-delay: 0.3s; }
+.voice-wave:nth-child(5) { animation-delay: 0.4s; }
+
+/* Microsoft To Do inspired colors */
+.ms-blue {
+  background-color: hsl(var(--ms-blue));
+}
+
+.ms-blue-dark {
+  background-color: hsl(var(--ms-blue-dark));
+}
+
+.ms-blue-light {
+  background-color: hsl(var(--ms-blue-light));
+}
+
+.ms-success {
+  background-color: hsl(var(--ms-success));
+}
+
+.ms-warning {
+  background-color: hsl(var(--ms-warning));
+}
+
+.ms-error {
+  background-color: hsl(var(--ms-error));
+}
+
+.text-ms-blue {
+  color: hsl(var(--ms-blue));
+}
+
+.text-ms-success {
+  color: hsl(var(--ms-success));
+}
+
+.text-ms-warning {
+  color: hsl(var(--ms-warning));
+}
+
+.text-ms-error {
+  color: hsl(var(--ms-error));
+}
+
+.text-ms-gray-dark {
+  color: hsl(var(--ms-gray-dark));
+}
+
+.text-ms-gray-medium {
+  color: hsl(var(--ms-gray-medium));
+}
+
+.border-ms-blue {
+  border-color: hsl(var(--ms-blue));
+}
+
+.bg-ms-gray-light {
+  background-color: hsl(var(--ms-gray-light));
+}
