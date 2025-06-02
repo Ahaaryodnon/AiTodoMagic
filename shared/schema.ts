@@ -1,4 +1,5 @@
 import { pgTable, text, serial, integer, boolean, timestamp, jsonb } from "drizzle-orm/pg-core";
+import { relations } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -32,6 +33,24 @@ export const voiceCommands = pgTable("voice_commands", {
   processed: boolean("processed").default(false),
   createdAt: timestamp("created_at").defaultNow(),
 });
+
+export const tasksRelations = relations(tasks, ({ many }) => ({
+  activities: many(activities),
+}));
+
+export const activitiesRelations = relations(activities, ({ one }) => ({
+  task: one(tasks, {
+    fields: [activities.id],
+    references: [tasks.id],
+  }),
+}));
+
+export const voiceCommandsRelations = relations(voiceCommands, ({ one }) => ({
+  task: one(tasks, {
+    fields: [voiceCommands.id],
+    references: [tasks.id],
+  }),
+}));
 
 export const insertTaskSchema = createInsertSchema(tasks).omit({
   id: true,

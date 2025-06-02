@@ -1,4 +1,6 @@
 import { tasks, activities, voiceCommands, type Task, type InsertTask, type Activity, type InsertActivity, type VoiceCommand, type InsertVoiceCommand } from "@shared/schema";
+import { db } from "./db";
+import { eq, desc } from "drizzle-orm";
 
 export interface IStorage {
   // Tasks
@@ -18,109 +20,78 @@ export interface IStorage {
   markVoiceCommandProcessed(id: number): Promise<void>;
 }
 
-export class MemStorage implements IStorage {
-  private tasks: Map<number, Task>;
-  private activities: Map<number, Activity>;
-  private voiceCommands: Map<number, VoiceCommand>;
-  private currentTaskId: number;
-  private currentActivityId: number;
-  private currentVoiceCommandId: number;
-
-  constructor() {
-    this.tasks = new Map();
-    this.activities = new Map();
-    this.voiceCommands = new Map();
-    this.currentTaskId = 1;
-    this.currentActivityId = 1;
-    this.currentVoiceCommandId = 1;
-  }
-
-  // Tasks
+export class DatabaseStorage implements IStorage {
   async getTasks(): Promise<Task[]> {
-    return Array.from(this.tasks.values()).sort((a, b) => {
-      // Sort by AI score descending, then by priority
-      const priorityOrder = { high: 4, medium: 3, normal: 2, low: 1 };
-      if (a.aiScore !== b.aiScore) {
-        return (b.aiScore || 0) - (a.aiScore || 0);
-      }
-      return priorityOrder[b.priority as keyof typeof priorityOrder] - priorityOrder[a.priority as keyof typeof priorityOrder];
-    });
+    const result = await db.select().from(tasks).orderBy(desc(tasks.aiScore), desc(tasks.createdAt));
+    return result;
   }
 
   async getTask(id: number): Promise<Task | undefined> {
-    return this.tasks.get(id);
+    const [task] = await db.select().from(tasks).where(eq(tasks.id, id));
+    return task || undefined;
   }
 
   async createTask(insertTask: InsertTask): Promise<Task> {
-    const id = this.currentTaskId++;
-    const now = new Date();
-    const task: Task = { 
-      ...insertTask, 
-      id, 
-      createdAt: now,
-      updatedAt: now
-    };
-    this.tasks.set(id, task);
+    const [task] = await db
+      .insert(tasks)
+      .values(insertTask)
+      .returning();
     return task;
   }
 
   async updateTask(id: number, updates: Partial<InsertTask>): Promise<Task | undefined> {
-    const task = this.tasks.get(id);
-    if (!task) return undefined;
-    
-    const updatedTask: Task = { 
-      ...task, 
-      ...updates, 
-      updatedAt: new Date()
-    };
-    this.tasks.set(id, updatedTask);
-    return updatedTask;
+    const [task] = await db
+      .update(tasks)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(tasks.id, id))
+      .returning();
+    return task || undefined;
   }
 
   async deleteTask(id: number): Promise<boolean> {
-    return this.tasks.delete(id);
+    const result = await db.delete(tasks).where(eq(tasks.id, id));
+    return result.rowCount > 0;
   }
 
-  // Activities
   async getActivities(limit = 10): Promise<Activity[]> {
-    return Array.from(this.activities.values())
-      .sort((a, b) => (b.createdAt?.getTime() || 0) - (a.createdAt?.getTime() || 0))
-      .slice(0, limit);
+    const result = await db
+      .select()
+      .from(activities)
+      .orderBy(desc(activities.createdAt))
+      .limit(limit);
+    return result;
   }
 
   async createActivity(insertActivity: InsertActivity): Promise<Activity> {
-    const id = this.currentActivityId++;
-    const activity: Activity = {
-      ...insertActivity,
-      id,
-      createdAt: new Date()
-    };
-    this.activities.set(id, activity);
+    const [activity] = await db
+      .insert(activities)
+      .values(insertActivity)
+      .returning();
     return activity;
   }
 
-  // Voice Commands
   async createVoiceCommand(insertCommand: InsertVoiceCommand): Promise<VoiceCommand> {
-    const id = this.currentVoiceCommandId++;
-    const command: VoiceCommand = {
-      ...insertCommand,
-      id,
-      createdAt: new Date()
-    };
-    this.voiceCommands.set(id, command);
+    const [command] = await db
+      .insert(voiceCommands)
+      .values(insertCommand)
+      .returning();
     return command;
   }
 
   async getUnprocessedVoiceCommands(): Promise<VoiceCommand[]> {
-    return Array.from(this.voiceCommands.values()).filter(cmd => !cmd.processed);
+    const result = await db
+      .select()
+      .from(voiceCommands)
+      .where(eq(voiceCommands.processed, false));
+    return result;
   }
 
   async markVoiceCommandProcessed(id: number): Promise<void> {
-    const command = this.voiceCommands.get(id);
-    if (command) {
-      this.voiceCommands.set(id, { ...command, processed: true });
-    }
+    await db
+      .update(voiceCommands)
+      .set({ processed: true })
+      .where(eq(voiceCommands.id, id));
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();
