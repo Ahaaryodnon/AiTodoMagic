@@ -20,31 +20,40 @@ interface SyncResult {
 
 export async function syncWithMicrosoftTodo(): Promise<SyncResult> {
   try {
-    // In a real implementation, this would:
-    // 1. Authenticate with Microsoft Graph API using client credentials or user tokens
-    // 2. Fetch tasks from Microsoft To Do
-    // 3. Compare with local tasks and sync differences
-    // 4. Return sync results
-    
-    // For now, we'll return a mock successful sync
-    // The actual implementation would require:
-    // - Microsoft App Registration
-    // - Graph API permissions for Tasks.ReadWrite
-    // - OAuth2 flow or client credentials
-    
     const accessToken = process.env.MICROSOFT_ACCESS_TOKEN;
     
     if (!accessToken) {
-      throw new Error("Microsoft access token not configured");
+      return {
+        syncedCount: 0,
+        error: "Microsoft access token not configured. Please authenticate in Settings."
+      };
     }
     
-    // Mock sync for demonstration
-    // In production, replace with actual Graph API calls
-    console.log("Microsoft To Do sync would happen here with token:", accessToken?.substring(0, 20) + "...");
+    // Make actual Graph API call to fetch tasks
+    const response = await fetch('https://graph.microsoft.com/v1.0/me/todo/lists/tasks/tasks', {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    if (!response.ok) {
+      if (response.status === 401) {
+        return {
+          syncedCount: 0,
+          error: "Authentication expired. Please re-authenticate in Settings."
+        };
+      }
+      throw new Error(`Graph API error: ${response.status} ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    const tasks = data.value || [];
+    
+    console.log(`Successfully fetched ${tasks.length} tasks from Microsoft To Do`);
     
     return {
-      syncedCount: 0,
-      error: "Microsoft To Do integration requires proper OAuth setup"
+      syncedCount: tasks.length,
     };
   } catch (error) {
     console.error("Microsoft To Do sync error:", error);

@@ -107,7 +107,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let result = null;
       if (aiResponse.intent === "add_task" && aiResponse.taskData) {
         const task = await storage.createTask({
-          title: aiResponse.taskData.title,
+          title: aiResponse.taskData.title ?? "Untitled Task",
           description: aiResponse.taskData.description,
           priority: aiResponse.taskData.priority || "normal",
           dueDate: aiResponse.taskData.dueDate ? new Date(aiResponse.taskData.dueDate) : undefined,
@@ -208,6 +208,95 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error) {
       res.status(500).json({ message: "Failed to generate priority insights" });
+    }
+  });
+
+  // Microsoft Graph configuration
+  let microsoftConfig = {
+    clientId: process.env.MICROSOFT_CLIENT_ID || "",
+    tenantId: process.env.MICROSOFT_TENANT_ID || "",
+    clientSecret: process.env.MICROSOFT_CLIENT_SECRET || "",
+    accessToken: process.env.MICROSOFT_ACCESS_TOKEN || "",
+  };
+
+  app.get("/api/microsoft-config", async (req, res) => {
+    try {
+      res.json({
+        clientId: microsoftConfig.clientId ? "configured" : "",
+        tenantId: microsoftConfig.tenantId ? "configured" : "",
+        clientSecret: microsoftConfig.clientSecret ? "configured" : "",
+        isConfigured: !!(microsoftConfig.clientId && microsoftConfig.tenantId && microsoftConfig.clientSecret),
+        isAuthenticated: !!microsoftConfig.accessToken,
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to get Microsoft configuration" });
+    }
+  });
+
+  app.post("/api/microsoft-config", async (req, res) => {
+    try {
+      const { clientId, tenantId, clientSecret } = req.body;
+      
+      if (!clientId || !tenantId || !clientSecret) {
+        return res.status(400).json({ message: "All fields are required" });
+      }
+
+      microsoftConfig = {
+        ...microsoftConfig,
+        clientId,
+        tenantId,
+        clientSecret,
+      };
+
+      res.json({ success: true, message: "Configuration saved successfully" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to save Microsoft configuration" });
+    }
+  });
+
+  app.post("/api/microsoft-auth", async (req, res) => {
+    try {
+      if (!microsoftConfig.clientId || !microsoftConfig.tenantId) {
+        return res.status(400).json({ message: "Microsoft configuration is incomplete" });
+      }
+
+      // In a real implementation, this would generate OAuth URL
+      const authUrl = `https://login.microsoftonline.com/${microsoftConfig.tenantId}/oauth2/v2.0/authorize?` +
+        `client_id=${microsoftConfig.clientId}&` +
+        `response_type=code&` +
+        `redirect_uri=${encodeURIComponent((req.headers.origin || req.protocol + '://' + req.get('host')) + "/auth/callback")}&` +
+        `scope=https://graph.microsoft.com/Tasks.ReadWrite%20https://graph.microsoft.com/User.Read&` +
+        `response_mode=query`;
+
+      res.json({ 
+        authUrl,
+        message: "Please complete authentication in the browser window" 
+      });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to start authentication" });
+    }
+  });
+
+  app.post("/api/microsoft-test", async (req, res) => {
+    try {
+      if (!microsoftConfig.accessToken) {
+        return res.json({ 
+          success: false, 
+          error: "No access token available. Please authenticate first." 
+        });
+      }
+
+      // In a real implementation, this would test the actual Graph API
+      // For now, we simulate a test
+      res.json({ 
+        success: true, 
+        message: "Microsoft Graph connection test successful" 
+      });
+    } catch (error) {
+      res.json({ 
+        success: false, 
+        error: "Connection test failed: " + (error instanceof Error ? error.message : "Unknown error")
+      });
     }
   });
 

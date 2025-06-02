@@ -1,8 +1,9 @@
 import { VoiceInput } from "@/components/voice-input";
 import { TaskDisplay } from "@/components/task-display";
 import { ActivityFeed } from "@/components/activity-feed";
+import { SettingsDialog } from "@/components/settings-dialog";
 import { Button } from "@/components/ui/button";
-import { Mic, Settings, Moon, Sun } from "lucide-react";
+import { Mic, Moon, Sun } from "lucide-react";
 import { useTheme } from "@/components/theme-provider";
 
 export default function Home() {
@@ -35,13 +36,7 @@ export default function Home() {
                 <span className="text-sm text-gray-600 dark:text-gray-400">Connected to Microsoft To Do</span>
               </div>
               
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
-              >
-                <Settings className="w-5 h-5" />
-              </Button>
+              <SettingsDialog />
               
               <Button
                 variant="ghost"
