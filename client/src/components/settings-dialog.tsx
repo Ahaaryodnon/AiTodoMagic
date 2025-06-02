@@ -93,8 +93,30 @@ export function SettingsDialog() {
     onSuccess: (data) => {
       toast({
         title: "Connection Test",
-        description: data.success ? "Successfully connected to Microsoft Graph!" : "Connection failed: " + data.error,
+        description: data.success ? data.message : "Connection failed: " + data.error,
         variant: data.success ? "default" : "destructive",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/microsoft-config"] });
+    },
+  });
+
+  const logoutMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/microsoft-logout", {});
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Logged Out",
+        description: "Successfully disconnected from Microsoft Graph.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/microsoft-config"] });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to logout from Microsoft Graph.",
+        variant: "destructive",
       });
     },
   });
@@ -176,6 +198,16 @@ export function SettingsDialog() {
                       size="sm"
                     >
                       Authenticate
+                    </Button>
+                  )}
+                  {microsoftConfig?.isAuthenticated && (
+                    <Button
+                      variant="outline"
+                      onClick={() => logoutMutation.mutate()}
+                      disabled={logoutMutation.isPending}
+                      size="sm"
+                    >
+                      Disconnect
                     </Button>
                   )}
                 </div>

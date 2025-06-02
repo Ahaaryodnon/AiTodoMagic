@@ -260,11 +260,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Microsoft configuration is incomplete" });
       }
 
-      // In a real implementation, this would generate OAuth URL
+      // Generate OAuth URL
+      const redirectUri = `${req.protocol}://${req.get('host')}/auth/callback`;
       const authUrl = `https://login.microsoftonline.com/${microsoftConfig.tenantId}/oauth2/v2.0/authorize?` +
         `client_id=${microsoftConfig.clientId}&` +
         `response_type=code&` +
-        `redirect_uri=${encodeURIComponent((req.headers.origin || req.protocol + '://' + req.get('host')) + "/auth/callback")}&` +
+        `redirect_uri=${encodeURIComponent(redirectUri)}&` +
         `scope=https://graph.microsoft.com/Tasks.ReadWrite%20https://graph.microsoft.com/User.Read&` +
         `response_mode=query`;
 
@@ -277,6 +278,102 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // OAuth callback endpoint
+  app.get("/auth/callback", async (req, res) => {
+    try {
+      const { code, error, error_description } = req.query;
+
+      if (error) {
+        return res.send(`
+          <html>
+            <body>
+              <h2>Authentication Error</h2>
+              <p>Error: ${error}</p>
+              <p>Description: ${error_description}</p>
+              <button onclick="window.close()">Close Window</button>
+            </body>
+          </html>
+        `);
+      }
+
+      if (!code) {
+        return res.send(`
+          <html>
+            <body>
+              <h2>Authentication Error</h2>
+              <p>No authorization code received</p>
+              <button onclick="window.close()">Close Window</button>
+            </body>
+          </html>
+        `);
+      }
+
+      // Exchange code for access token
+      const tokenUrl = `https://login.microsoftonline.com/${microsoftConfig.tenantId}/oauth2/v2.0/token`;
+      const redirectUri = `${req.protocol}://${req.get('host')}/auth/callback`;
+      
+      const tokenResponse = await fetch(tokenUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          client_id: microsoftConfig.clientId,
+          client_secret: microsoftConfig.clientSecret,
+          code: code as string,
+          redirect_uri: redirectUri,
+          grant_type: 'authorization_code',
+          scope: 'https://graph.microsoft.com/Tasks.ReadWrite https://graph.microsoft.com/User.Read',
+        }),
+      });
+
+      const tokenData = await tokenResponse.json();
+
+      if (!tokenResponse.ok) {
+        return res.send(`
+          <html>
+            <body>
+              <h2>Token Exchange Error</h2>
+              <p>Error: ${tokenData.error}</p>
+              <p>Description: ${tokenData.error_description}</p>
+              <button onclick="window.close()">Close Window</button>
+            </body>
+          </html>
+        `);
+      }
+
+      // Store the access token
+      microsoftConfig.accessToken = tokenData.access_token;
+
+      res.send(`
+        <html>
+          <body>
+            <h2>Authentication Successful!</h2>
+            <p>You have successfully connected to Microsoft Graph.</p>
+            <p>You can now close this window and return to the application.</p>
+            <script>
+              setTimeout(() => {
+                window.close();
+              }, 3000);
+            </script>
+            <button onclick="window.close()">Close Window</button>
+          </body>
+        </html>
+      `);
+    } catch (error) {
+      console.error('OAuth callback error:', error);
+      res.send(`
+        <html>
+          <body>
+            <h2>Authentication Error</h2>
+            <p>An unexpected error occurred during authentication.</p>
+            <button onclick="window.close()">Close Window</button>
+          </body>
+        </html>
+      `);
+    }
+  });
+
   app.post("/api/microsoft-test", async (req, res) => {
     try {
       if (!microsoftConfig.accessToken) {
@@ -286,17 +383,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // In a real implementation, this would test the actual Graph API
-      // For now, we simulate a test
+      // Test the connection by making a real Graph API call
+      const response = await fetch('https://graph.microsoft.com/v1.0/me', {
+        headers: {
+          'Authorization': `Bearer ${microsoftConfig.accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          // Clear invalid token
+          microsoftConfig.accessToken = "";
+          return res.json({ 
+            success: false, 
+            error: "Authentication expired. Please re-authenticate." 
+          });
+        }
+        throw new Error(`Graph API error: ${response.status}`);
+      }
+
+      const userData = await response.json();
       res.json({ 
         success: true, 
-        message: "Microsoft Graph connection test successful" 
+        message: `Successfully connected as ${userData.displayName || userData.userPrincipalName}` 
       });
     } catch (error) {
       res.json({ 
         success: false, 
         error: "Connection test failed: " + (error instanceof Error ? error.message : "Unknown error")
       });
+    }
+  });
+
+  app.post("/api/microsoft-logout", async (req, res) => {
+    try {
+      microsoftConfig.accessToken = "";
+      res.json({ success: true, message: "Successfully logged out from Microsoft Graph" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to logout" });
     }
   });
 
