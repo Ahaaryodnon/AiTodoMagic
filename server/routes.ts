@@ -221,6 +221,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/microsoft-config", async (req, res) => {
     try {
+      console.log("Current Microsoft config:", {
+        hasClientId: !!microsoftConfig.clientId,
+        hastenantId: !!microsoftConfig.tenantId,
+        hasClientSecret: !!microsoftConfig.clientSecret,
+        hasAccessToken: !!microsoftConfig.accessToken
+      });
+      
       res.json({
         clientId: microsoftConfig.clientId ? "configured" : "",
         tenantId: microsoftConfig.tenantId ? "configured" : "",
