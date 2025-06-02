@@ -5,9 +5,60 @@ import { SettingsDialog } from "@/components/settings-dialog";
 import { Button } from "@/components/ui/button";
 import { Mic, Moon, Sun } from "lucide-react";
 import { useTheme } from "@/components/theme-provider";
+import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Calendar, Plus, CheckCircle2, Clock, AlertTriangle, Mic, Settings, Activity } from "lucide-react";
+import { toast, useToast } from "@/components/ui/use-toast";
+import { format } from "date-fns";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+
+import { apiRequest } from "@/lib/queryClient";
 
 export default function Home() {
   const { theme, setTheme } = useTheme();
+  const [newTask, setNewTask] = useState({
+    title: "",
+    description: "",
+    priority: "medium" as "low" | "medium" | "high",
+    dueDate: "",
+  });
+  const [selectedTask, setSelectedTask] = useState<any>(null);
+  const [showActivityFeed, setShowActivityFeed] = useState(false);
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  // Handle authentication success/error from URL params
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const authResult = urlParams.get('auth');
+    const error = urlParams.get('error');
+
+    if (authResult === 'success') {
+      toast({
+        title: "Authentication Successful",
+        description: "Successfully connected to Microsoft Graph!",
+      });
+      // Clear URL params
+      window.history.replaceState({}, document.title, window.location.pathname);
+      // Refresh config to show updated status
+      queryClient.invalidateQueries({ queryKey: ["/api/microsoft-config"] });
+    } else if (error) {
+      toast({
+        title: "Authentication Error",
+        description: `Authentication failed: ${error}`,
+        variant: "destructive",
+      });
+      // Clear URL params
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, [toast, queryClient]);
 
   const toggleTheme = () => {
     setTheme(theme === "dark" ? "light" : "dark");
@@ -28,16 +79,16 @@ export default function Home() {
                 <p className="text-xs text-gray-600 dark:text-gray-400">AI-Powered Microsoft To Do</p>
               </div>
             </div>
-            
+
             {/* Controls */}
             <div className="flex items-center space-x-4">
               <div className="flex items-center space-x-2">
                 <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                 <span className="text-sm text-gray-600 dark:text-gray-400">Connected to Microsoft To Do</span>
               </div>
-              
+
               <SettingsDialog />
-              
+
               <Button
                 variant="ghost"
                 size="sm"
@@ -62,13 +113,13 @@ export default function Home() {
           <div className="lg:col-span-1">
             <VoiceInput />
           </div>
-          
+
           {/* Tasks Display Section */}
           <div className="lg:col-span-2">
             <TaskDisplay />
           </div>
         </div>
-        
+
         {/* Recent Activity Feed */}
         <div className="mt-8">
           <ActivityFeed />
