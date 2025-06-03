@@ -290,8 +290,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Microsoft configuration is incomplete" });
       }
 
-      // Generate OAuth URL
-      const redirectUri = `${req.protocol}://${req.get('host')}/auth/callback`;
+      // Generate OAuth URL - Force HTTPS for Replit apps
+      const host = req.get('host');
+      const redirectUri = `https://${host}/auth/callback`;
       const authUrl = `https://login.microsoftonline.com/${config.tenantId}/oauth2/v2.0/authorize?` +
         `client_id=${config.clientId}&` +
         `response_type=code&` +
