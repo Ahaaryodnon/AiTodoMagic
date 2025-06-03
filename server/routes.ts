@@ -343,7 +343,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Exchange code for access token
       const tokenUrl = `https://login.microsoftonline.com/${config.tenantId}/oauth2/v2.0/token`;
-      const redirectUri = `${req.protocol}://${req.get('host')}/auth/callback`;
+      const redirectUri = `https://${req.get('host')}/auth/callback`;
       
       const tokenResponse = await fetch(tokenUrl, {
         method: 'POST',
