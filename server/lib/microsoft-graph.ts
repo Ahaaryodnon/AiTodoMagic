@@ -26,9 +26,6 @@ export async function syncWithMicrosoftTodo(): Promise<SyncResult> {
     
     const [config] = await db.select().from(microsoftConfig).limit(1);
     
-    console.log("Microsoft config found:", config ? "Yes" : "No");
-    console.log("Access token available:", config?.accessToken ? "Yes" : "No");
-    
     if (!config || !config.accessToken) {
       return {
         syncedCount: 0,
