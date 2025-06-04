@@ -22,7 +22,9 @@ export async function syncWithMicrosoftTodo(): Promise<SyncResult> {
   try {
     // Get the access token from the database instead of environment variables
     const { db } = await import("../db");
-    const { microsoftConfig } = await import("@shared/schema");
+    const { microsoftConfig, tasks } = await import("@shared/schema");
+    const { isNotNull } = await import("drizzle-orm");
+    const { storage } = await import("../storage");
     
     const [config] = await db.select().from(microsoftConfig).limit(1);
     
@@ -64,58 +66,68 @@ export async function syncWithMicrosoftTodo(): Promise<SyncResult> {
     // Use the first list (usually the default "Tasks" list)
     const defaultList = taskLists[0];
     
-    // Fetch tasks from the default list
-    const tasksResponse = await fetch(`https://graph.microsoft.com/v1.0/me/todo/lists/${defaultList.id}/tasks`, {
-      headers: {
-        'Authorization': `Bearer ${config.accessToken}`,
-        'Content-Type': 'application/json'
-      }
-    });
+    // Fetch all tasks with pagination (no filter to get maximum results)
+    let allTasks: any[] = [];
+    let nextLink = `https://graph.microsoft.com/v1.0/me/todo/lists/${defaultList.id}/tasks?$top=100`;
     
-    if (!tasksResponse.ok) {
-      throw new Error(`Tasks API error: ${tasksResponse.status} ${tasksResponse.statusText}`);
+    while (nextLink) {
+      const tasksResponse = await fetch(nextLink, {
+        headers: {
+          'Authorization': `Bearer ${config.accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (!tasksResponse.ok) {
+        throw new Error(`Tasks API error: ${tasksResponse.status} ${tasksResponse.statusText}`);
+      }
+      
+      const tasksData = await tasksResponse.json();
+      const taskBatch = tasksData.value || [];
+      allTasks.push(...taskBatch);
+      
+      // Check for next page
+      nextLink = tasksData['@odata.nextLink'] || null;
     }
     
-    const tasksData = await tasksResponse.json();
-    const microsoftTasks = tasksData.value || [];
+    // Filter for uncompleted tasks locally
+    const microsoftTasks = allTasks.filter(task => task.status !== 'completed');
     
-    console.log(`Successfully fetched ${microsoftTasks.length} tasks from Microsoft To Do`);
+    console.log(`Successfully fetched ${microsoftTasks.length} uncompleted tasks from Microsoft To Do`);
     
-    // Import tasks into local database
-    const { storage } = await import("../storage");
+    // Clear existing Microsoft tasks from local database before importing
+    await db.delete(tasks).where(isNotNull(tasks.microsoftId));
+    console.log("Cleared existing Microsoft tasks from local database");
+    
+    // Import uncompleted tasks into local database
     let importedCount = 0;
     
     for (const msTask of microsoftTasks) {
       try {
-        // Check if task already exists by Microsoft ID
-        const existingTasks = await storage.getTasks();
-        const existingTask = existingTasks.find(task => task.microsoftId === msTask.id);
+        // Convert Microsoft task to our task format
+        const priority = msTask.importance === 'high' ? 'high' : 
+                        msTask.importance === 'low' ? 'low' : 'normal';
         
-        if (!existingTask) {
-          // Convert Microsoft task to our task format
-          const priority = msTask.importance === 'high' ? 'high' : 
-                          msTask.importance === 'low' ? 'low' : 'normal';
-          
-          const completed = msTask.status === 'completed';
-          
-          let dueDate = null;
-          if (msTask.dueDateTime && msTask.dueDateTime.dateTime) {
-            dueDate = new Date(msTask.dueDateTime.dateTime);
-          }
-          
-          const description = msTask.body?.content || '';
-          
-          await storage.createTask({
-            title: msTask.title,
-            description: description,
-            priority: priority as 'low' | 'normal' | 'medium' | 'high',
-            completed: completed,
-            dueDate: dueDate,
-            microsoftId: msTask.id
-          });
-          
-          importedCount++;
+        // All tasks from this sync are uncompleted since we filtered for them
+        const completed = false;
+        
+        let dueDate = null;
+        if (msTask.dueDateTime && msTask.dueDateTime.dateTime) {
+          dueDate = new Date(msTask.dueDateTime.dateTime);
         }
+        
+        const description = msTask.body?.content || '';
+        
+        await storage.createTask({
+          title: msTask.title,
+          description: description,
+          priority: priority as 'low' | 'normal' | 'medium' | 'high',
+          completed: completed,
+          dueDate: dueDate,
+          microsoftId: msTask.id
+        });
+        
+        importedCount++;
       } catch (taskError) {
         console.error(`Failed to import task ${msTask.id}:`, taskError);
       }
