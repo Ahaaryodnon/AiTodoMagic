@@ -145,6 +145,69 @@ export async function syncWithMicrosoftTodo(): Promise<SyncResult> {
   }
 }
 
+export async function updateMicrosoftTaskStatus(microsoftId: string, completed: boolean): Promise<boolean> {
+  try {
+    // Get the access token from the database
+    const { db } = await import("../db");
+    const { microsoftConfig } = await import("@shared/schema");
+    
+    const [config] = await db.select().from(microsoftConfig).limit(1);
+    
+    if (!config || !config.accessToken) {
+      console.warn("Microsoft access token not available for task update");
+      return false;
+    }
+
+    // Get the default task list first
+    const listsResponse = await fetch('https://graph.microsoft.com/v1.0/me/todo/lists', {
+      headers: {
+        'Authorization': `Bearer ${config.accessToken}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!listsResponse.ok) {
+      console.error(`Failed to get task lists: ${listsResponse.status}`);
+      return false;
+    }
+
+    const listsData = await listsResponse.json();
+    const taskLists = listsData.value || [];
+
+    if (taskLists.length === 0) {
+      console.error("No task lists found in Microsoft To Do");
+      return false;
+    }
+
+    const defaultList = taskLists[0];
+
+    // Update the task status
+    const updateData = {
+      status: completed ? "completed" : "notStarted"
+    };
+
+    const updateResponse = await fetch(`https://graph.microsoft.com/v1.0/me/todo/lists/${defaultList.id}/tasks/${microsoftId}`, {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${config.accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(updateData)
+    });
+
+    if (!updateResponse.ok) {
+      console.error(`Failed to update Microsoft task: ${updateResponse.status}`);
+      return false;
+    }
+
+    console.log(`Successfully updated Microsoft To Do task status: ${microsoftId} -> ${completed ? 'completed' : 'not completed'}`);
+    return true;
+  } catch (error) {
+    console.error("Microsoft task update error:", error);
+    return false;
+  }
+}
+
 export async function createMicrosoftTask(title: string, description?: string): Promise<string | null> {
   try {
     // Get the access token from the database

@@ -7,6 +7,70 @@ import { syncWithMicrosoftTodo } from "./lib/microsoft-graph";
 import { db } from "./db";
 import { eq } from "drizzle-orm";
 
+// Fuzzy string matching helper function
+function calculateSimilarity(str1: string, str2: string): number {
+  const s1 = str1.toLowerCase().trim();
+  const s2 = str2.toLowerCase().trim();
+  
+  // Exact match
+  if (s1 === s2) return 1.0;
+  
+  // Contains match
+  if (s1.includes(s2) || s2.includes(s1)) return 0.8;
+  
+  // Word-based similarity
+  const words1 = s1.split(/\s+/);
+  const words2 = s2.split(/\s+/);
+  
+  let matchingWords = 0;
+  for (const word1 of words1) {
+    for (const word2 of words2) {
+      if (word1.includes(word2) || word2.includes(word1) || levenshteinDistance(word1, word2) <= 2) {
+        matchingWords++;
+        break;
+      }
+    }
+  }
+  
+  const wordSimilarity = matchingWords / Math.max(words1.length, words2.length);
+  
+  // Character-based Levenshtein distance
+  const distance = levenshteinDistance(s1, s2);
+  const maxLen = Math.max(s1.length, s2.length);
+  const charSimilarity = 1 - (distance / maxLen);
+  
+  // Return weighted average
+  return (wordSimilarity * 0.7) + (charSimilarity * 0.3);
+}
+
+function levenshteinDistance(str1: string, str2: string): number {
+  const matrix = [];
+  
+  for (let i = 0; i <= str2.length; i++) {
+    matrix[i] = [i];
+  }
+  
+  for (let j = 0; j <= str1.length; j++) {
+    matrix[0][j] = j;
+  }
+  
+  for (let i = 1; i <= str2.length; i++) {
+    for (let j = 1; j <= str1.length; j++) {
+      if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j] + 1
+        );
+      }
+    }
+  }
+  
+  return matrix[str2.length][str1.length];
+}
+
 // Helper functions for Microsoft configuration
 async function getMicrosoftConfig() {
   const [config] = await db.select().from(microsoftConfig).limit(1);
@@ -72,10 +136,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const id = parseInt(req.params.id);
       const updates = req.body;
+      const oldTask = await storage.getTask(id);
       const task = await storage.updateTask(id, updates);
       
       if (!task) {
         return res.status(404).json({ message: "Task not found" });
+      }
+
+      // If this is a Microsoft task and completion status changed, sync back to Microsoft
+      if (task.microsoftId && oldTask && 'completed' in updates && oldTask.completed !== updates.completed) {
+        const { updateMicrosoftTaskStatus } = await import("./lib/microsoft-graph");
+        const syncSuccess = await updateMicrosoftTaskStatus(task.microsoftId, updates.completed);
+        
+        if (syncSuccess) {
+          await storage.createActivity({
+            type: "sync",
+            description: `Synced task status to Microsoft To Do: "${task.title}" ${updates.completed ? 'completed' : 'reopened'}`,
+            metadata: { taskId: task.id, microsoftId: task.microsoftId }
+          });
+        }
       }
 
       // Log activity
@@ -155,18 +234,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
           metadata: { voiceCommandId: voiceCommand.id, taskId: task.id }
         });
       } else if (aiResponse.intent === "update_task" && aiResponse.taskData) {
-        // Find task by title similarity and update
+        // Find task by title similarity using fuzzy matching
         const tasks = await storage.getTasks();
-        const targetTask = tasks.find(t => 
-          t.title.toLowerCase().includes(aiResponse.taskData?.title?.toLowerCase() || "")
-        );
+        const searchTitle = aiResponse.taskData?.title || "";
+        
+        let bestMatch = null;
+        let bestSimilarity = 0;
+        
+        for (const task of tasks) {
+          const similarity = calculateSimilarity(task.title, searchTitle);
+          if (similarity > bestSimilarity && similarity > 0.5) { // Minimum 50% similarity
+            bestMatch = task;
+            bestSimilarity = similarity;
+          }
+        }
 
-        if (targetTask) {
-          const updatedTask = await storage.updateTask(targetTask.id, {
-            title: aiResponse.taskData.title || targetTask.title,
-            description: aiResponse.taskData.description || targetTask.description,
-            priority: aiResponse.taskData.priority || targetTask.priority,
-            completed: aiResponse.taskData.completed ?? targetTask.completed
+        if (bestMatch) {
+          const updatedTask = await storage.updateTask(bestMatch.id, {
+            title: aiResponse.taskData.title || bestMatch.title,
+            description: aiResponse.taskData.description || bestMatch.description,
+            priority: aiResponse.taskData.priority || bestMatch.priority,
+            completed: aiResponse.taskData.completed ?? bestMatch.completed
           });
           result = updatedTask;
 
@@ -298,11 +386,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         `response_type=code&` +
         `redirect_uri=${encodeURIComponent(redirectUri)}&` +
         `scope=https://graph.microsoft.com/Tasks.ReadWrite%20https://graph.microsoft.com/User.Read&` +
-        `response_mode=query`;
+        `response_mode=query&` +
+        `prompt=select_account`;
 
       res.json({ 
         authUrl,
-        message: "Please complete authentication in the browser window" 
+        redirectUri,
+        isMobile: /Mobile|Android|iPhone|iPad/.test(req.get('User-Agent') || ''),
+        message: "Please complete authentication" 
       });
     } catch (error) {
       res.status(500).json({ message: "Failed to start authentication" });
