@@ -233,35 +233,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
           description: `Voice command processed: Added "${task.title}"`,
           metadata: { voiceCommandId: voiceCommand.id, taskId: task.id }
         });
-      } else if (aiResponse.intent === "update_task" && aiResponse.taskData) {
+      } else if ((aiResponse.intent === "update_task" || aiResponse.intent === "complete_task") && aiResponse.taskData) {
         // Find task by title similarity using fuzzy matching
         const tasks = await storage.getTasks();
         const searchTitle = aiResponse.taskData?.title || "";
+        
+        console.log(`Voice command: Looking for task "${searchTitle}"`);
+        console.log(`Available tasks: ${tasks.map(t => t.title).join(', ')}`);
         
         let bestMatch = null;
         let bestSimilarity = 0;
         
         for (const task of tasks) {
           const similarity = calculateSimilarity(task.title, searchTitle);
+          console.log(`Similarity between "${task.title}" and "${searchTitle}": ${similarity}`);
           if (similarity > bestSimilarity && similarity > 0.5) { // Minimum 50% similarity
             bestMatch = task;
             bestSimilarity = similarity;
           }
         }
+        
+        console.log(`Best match: ${bestMatch?.title} (${bestSimilarity})`);
 
         if (bestMatch) {
-          const updatedTask = await storage.updateTask(bestMatch.id, {
+          // For complete_task intent, set completed to true
+          const updateData = {
             title: aiResponse.taskData.title || bestMatch.title,
             description: aiResponse.taskData.description || bestMatch.description,
             priority: aiResponse.taskData.priority || bestMatch.priority,
-            completed: aiResponse.taskData.completed ?? bestMatch.completed
-          });
+            completed: aiResponse.intent === "complete_task" ? true : (aiResponse.taskData.completed ?? bestMatch.completed)
+          };
+
+          const oldTask = bestMatch;
+          const updatedTask = await storage.updateTask(bestMatch.id, updateData);
           result = updatedTask;
+
+          // If this is a Microsoft task and completion status changed, sync back to Microsoft
+          if (updatedTask && bestMatch.microsoftId && oldTask.completed !== updateData.completed) {
+            const { updateMicrosoftTaskStatus } = await import("./lib/microsoft-graph");
+            const syncSuccess = await updateMicrosoftTaskStatus(bestMatch.microsoftId, updateData.completed);
+            
+            if (syncSuccess) {
+              await storage.createActivity({
+                type: "sync",
+                description: `Synced task status to Microsoft To Do: "${bestMatch.title}" ${updateData.completed ? 'completed' : 'reopened'}`,
+                metadata: { taskId: bestMatch.id, microsoftId: bestMatch.microsoftId }
+              });
+            }
+          }
 
           await storage.createActivity({
             type: "voice_command",
-            description: `Voice command processed: Updated "${targetTask.title}"`,
-            metadata: { voiceCommandId: voiceCommand.id, taskId: targetTask.id }
+            description: `Voice command processed: ${aiResponse.intent === "complete_task" ? "Completed" : "Updated"} "${bestMatch.title}" (${Math.round(bestSimilarity * 100)}% match)`,
+            metadata: { voiceCommandId: voiceCommand.id, taskId: bestMatch.id, similarity: bestSimilarity }
           });
         }
       }

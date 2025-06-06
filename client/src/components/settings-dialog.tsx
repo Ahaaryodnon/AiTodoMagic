@@ -68,11 +68,41 @@ export function SettingsDialog() {
     },
     onSuccess: (data) => {
       if (data.authUrl) {
-        window.open(data.authUrl, "_blank");
-        toast({
-          title: "Authentication Started",
-          description: "Please complete authentication in the new window.",
-        });
+        // For mobile devices, navigate to the auth URL directly instead of opening a new window
+        if (data.isMobile || /Mobile|Android|iPhone|iPad/.test(navigator.userAgent)) {
+          toast({
+            title: "Redirecting to Microsoft",
+            description: "You'll be redirected to Microsoft for authentication.",
+          });
+          // Use a short delay to show the toast before redirecting
+          setTimeout(() => {
+            window.location.href = data.authUrl;
+          }, 1000);
+        } else {
+          // Desktop: open in new window
+          const authWindow = window.open(data.authUrl, "_blank", "width=500,height=600");
+          if (!authWindow) {
+            // Fallback if popup is blocked
+            toast({
+              title: "Authentication Link",
+              description: "Please click here to authenticate with Microsoft.",
+              action: (
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => window.location.href = data.authUrl}
+                >
+                  Authenticate
+                </Button>
+              ),
+            });
+          } else {
+            toast({
+              title: "Authentication Started",
+              description: "Please complete authentication in the new window.",
+            });
+          }
+        }
       }
       queryClient.invalidateQueries({ queryKey: ["/api/microsoft-config"] });
     },
