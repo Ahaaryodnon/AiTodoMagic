@@ -238,22 +238,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const tasks = await storage.getTasks();
         const searchTitle = aiResponse.taskData?.title || "";
         
-        console.log(`Voice command: Looking for task "${searchTitle}"`);
-        console.log(`Available tasks: ${tasks.map(t => t.title).join(', ')}`);
-        
         let bestMatch = null;
         let bestSimilarity = 0;
         
         for (const task of tasks) {
           const similarity = calculateSimilarity(task.title, searchTitle);
-          console.log(`Similarity between "${task.title}" and "${searchTitle}": ${similarity}`);
           if (similarity > bestSimilarity && similarity > 0.5) { // Minimum 50% similarity
             bestMatch = task;
             bestSimilarity = similarity;
           }
         }
-        
-        console.log(`Best match: ${bestMatch?.title} (${bestSimilarity})`);
 
         if (bestMatch) {
           // For complete_task intent, set completed to true
@@ -271,7 +265,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // If this is a Microsoft task and completion status changed, sync back to Microsoft
           if (updatedTask && bestMatch.microsoftId && oldTask.completed !== updateData.completed) {
             const { updateMicrosoftTaskStatus } = await import("./lib/microsoft-graph");
-            const syncSuccess = await updateMicrosoftTaskStatus(bestMatch.microsoftId, updateData.completed);
+            const syncSuccess = await updateMicrosoftTaskStatus(bestMatch.microsoftId, Boolean(updateData.completed));
             
             if (syncSuccess) {
               await storage.createActivity({
